@@ -23,6 +23,7 @@ import (
 	"sync"
 
 	"github.com/aws/amazon-eks-pod-identity-webhook/pkg"
+	awsarn "github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/prometheus/client_golang/prometheus"
@@ -151,7 +152,7 @@ func getAccountId() string {
 	metadata := ec2metadata.New(sess)
 	identity, err := metadata.GetInstanceIdentityDocument()
 	if err != nil {
-	  klog.Error("Could not get instance identity document", err)
+		klog.Error("Could not get instance identity document", err)
 	}
 
 	accountId := identity.AccountID
@@ -162,9 +163,14 @@ func getAccountId() string {
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 	arn, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.RoleARNAnnotation]
 
-	if !strings.Contains("/", arn) {
+	parsedARN, err := awsarn.Parse(arn)
+	if err != nil {
+		klog.Error("failed to parse ARN", err)
+	}
+
+	if awsarn.IsARN(arn) && parsedARN.AccountID == "" {
 		accountId := getAccountId()
-		arn = fmt.Sprintf("arn:aws:iam::%s:role/%s", accountId, arn)
+		arn = fmt.Sprintf("arn:aws:iam::%s:role/%s", accountId, parsedARN.Resource)
 	}
 
 	resp := &CacheResponse{}
