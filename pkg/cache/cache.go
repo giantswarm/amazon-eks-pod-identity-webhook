@@ -143,38 +143,44 @@ func (c *serviceAccountCache) ToJSON() string {
 	return string(contents)
 }
 
-func getAccountId() string {
+func getAccountId() (string, error) {
 	sess, err := session.NewSession()
 	if err != nil {
-		klog.Error("Could not create new session", err)
+		klog.Errorf("Could not create new session", err.Error())
+		return "", err
 	}
 
 	metadata := ec2metadata.New(sess)
 	identity, err := metadata.GetInstanceIdentityDocument()
 	if err != nil {
-		klog.Error("Could not get instance identity document", err)
+		klog.Errorf("Could not get instance identity document", err.Error())
+		return "", err
 	}
 
-	accountId := identity.AccountID
+	accountID := identity.AccountID
 
-	return accountId
+	return accountID, nil
 }
 
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 	arn, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.RoleARNAnnotation]
 
-	parsedARN, err := awsarn.Parse(arn)
-	if err != nil {
-		klog.Error("failed to parse ARN", err)
-	}
-
-	if awsarn.IsARN(arn) && parsedARN.AccountID == "" {
-		accountId := getAccountId()
-		arn = fmt.Sprintf("arn:aws:iam::%s:role/%s", accountId, parsedARN.Resource)
-	}
-
 	resp := &CacheResponse{}
 	if ok {
+		parsedARN, err := awsarn.Parse(arn)
+		if err != nil {
+			klog.Errorf("Failed to parse ARN", err.Error())
+		}
+
+		if awsarn.IsARN(arn) && parsedARN.AccountID == "" {
+			accountId, err := getAccountId()
+			if err != nil {
+        klog.Errorf("Couldn't get account ID", err.Error())
+			} else {
+			  arn = fmt.Sprintf("arn:aws:iam::%s:role/%s", accountId, parsedARN.Resource)
+			}
+		}
+
 		resp.RoleARN = arn
 		resp.Audience = c.defaultAudience
 		if audience, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.AudienceAnnotation]; ok {
