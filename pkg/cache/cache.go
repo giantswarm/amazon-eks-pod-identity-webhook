@@ -177,7 +177,7 @@ func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 			if err != nil {
         klog.Errorf("Couldn't get account ID", err.Error())
 			} else {
-			  arn = fmt.Sprintf("arn:aws:iam::%s:role/%s", accountId, parsedARN.Resource)
+			  arn = fmt.Sprintf("arn:aws:iam::%s:%s", accountId, parsedARN.Resource)
 			}
 		}
 
