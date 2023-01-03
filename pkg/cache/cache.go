@@ -157,7 +157,7 @@ func getAccountId() (string, error) {
 		return "", err
 	}
 
-	accountID := identity.AccountID
+	return identity.AccountID, nil
 
 	return accountID, nil
 }
