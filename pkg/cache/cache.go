@@ -158,8 +158,6 @@ func getAccountId() (string, error) {
 	}
 
 	return identity.AccountID, nil
-
-	return accountID, nil
 }
 
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
@@ -167,17 +165,20 @@ func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 
 	resp := &CacheResponse{}
 	if ok {
-		parsedARN, err := awsarn.Parse(arn)
-		if err != nil {
-			klog.Errorf("Failed to parse ARN", err.Error())
+		parsedARN, _ := awsarn.Parse(arn)
+
+		resource := parsedARN.Resource
+		if !awsarn.IsARN(arn) {
+			klog.V(4).Infof("Couldn't parse %s as valid ARN. Assuming it is a role name", arn)
+      resource = arn
 		}
 
-		if awsarn.IsARN(arn) && parsedARN.AccountID == "" {
+		if parsedARN.AccountID == "" {
 			accountId, err := getAccountId()
 			if err != nil {
         klog.Errorf("Couldn't get account ID", err.Error())
 			} else {
-			  arn = fmt.Sprintf("arn:aws:iam::%s:%s", accountId, parsedARN.Resource)
+			  arn = fmt.Sprintf("arn:aws:iam::%s:%s", accountId, resource)
 			}
 		}
 
