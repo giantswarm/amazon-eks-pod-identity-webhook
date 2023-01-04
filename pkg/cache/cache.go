@@ -142,20 +142,19 @@ func (c *serviceAccountCache) ToJSON() string {
 	return string(contents)
 }
 
-func identity() (ec2metadata.EC2InstanceIdentityDocument, error) {
-	var identity ec2metadata.EC2InstanceIdentityDocument
+func identity() (*ec2metadata.EC2InstanceIdentityDocument, error) {
 	sess, err := session.NewSession()
 	if err != nil {
-		return identity, err
+		return nil, err
 	}
 
 	metadata := ec2metadata.New(sess)
-	identity, err = metadata.GetInstanceIdentityDocument()
+	identity, err := metadata.GetInstanceIdentityDocument()
 	if err != nil {
-		return identity, err
+		return nil, err
 	}
 
-	return identity, nil
+	return &identity, nil
 }
 
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
