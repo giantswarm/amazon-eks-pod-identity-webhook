@@ -23,6 +23,8 @@ import (
 	"sync"
 
 	"github.com/aws/amazon-eks-pod-identity-webhook/pkg"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -140,8 +142,40 @@ func (c *serviceAccountCache) ToJSON() string {
 	return string(contents)
 }
 
+func identity() (*ec2metadata.EC2InstanceIdentityDocument, error) {
+	sess, err := session.NewSession()
+	if err != nil {
+		return nil, err
+	}
+
+	metadata := ec2metadata.New(sess)
+	identity, err := metadata.GetInstanceIdentityDocument()
+	if err != nil {
+		return nil, err
+	}
+
+	return &identity, nil
+}
+
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 	arn, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.RoleARNAnnotation]
+
+	if !strings.Contains(arn, "arn:") {
+		var accountId, partition string
+		identity, err := identity()
+		if err != nil {
+			klog.Error("Couldn't get account ID", err.Error())
+		}
+
+		accountId = identity.AccountID
+		if strings.Contains(identity.Region, "cn-") {
+			partition = "aws-cn"
+		} else {
+			partition = "aws"
+		}
+		arn = fmt.Sprintf("arn:%s:iam::%s:role/%s", partition, accountId, arn)
+	}
+
 	resp := &CacheResponse{}
 	if ok {
 		resp.RoleARN = arn
