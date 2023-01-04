@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/aws/amazon-eks-pod-identity-webhook/pkg"
-	awsarn "github.com/aws/aws-sdk-go/aws/arn"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/prometheus/client_golang/prometheus"
@@ -143,45 +142,43 @@ func (c *serviceAccountCache) ToJSON() string {
 	return string(contents)
 }
 
-func getAccountId() (string, error) {
+func identity() (ec2metadata.EC2InstanceIdentityDocument, error) {
+	var identity ec2metadata.EC2InstanceIdentityDocument
 	sess, err := session.NewSession()
 	if err != nil {
-		klog.Errorf("Could not create new session", err.Error())
-		return "", err
+		return identity, err
 	}
 
 	metadata := ec2metadata.New(sess)
-	identity, err := metadata.GetInstanceIdentityDocument()
+	identity, err = metadata.GetInstanceIdentityDocument()
 	if err != nil {
-		klog.Errorf("Could not get instance identity document", err.Error())
-		return "", err
+		return identity, err
 	}
 
-	return identity.AccountID, nil
+	return identity, nil
 }
 
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 	arn, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.RoleARNAnnotation]
 
+	if !strings.Contains(arn, "arn:") {
+		var accountId, partition string
+		identity, err := identity()
+		if err != nil {
+			klog.Error("Couldn't get account ID", err.Error())
+		}
+
+		accountId = identity.AccountID
+		if strings.Contains(identity.Region, "cn-") {
+			partition = "aws-cn"
+		} else {
+			partition = "aws"
+		}
+		arn = fmt.Sprintf("arn:%s:iam::%s:%s", partition, accountId, arn)
+	}
+
 	resp := &CacheResponse{}
 	if ok {
-		parsedARN, _ := awsarn.Parse(arn)
-
-		resource := parsedARN.Resource
-		if !awsarn.IsARN(arn) {
-			klog.V(4).Infof("Couldn't parse %s as valid ARN. Assuming it is a role name", arn)
-      resource = arn
-		}
-
-		if parsedARN.AccountID == "" {
-			accountId, err := getAccountId()
-			if err != nil {
-        klog.Errorf("Couldn't get account ID", err.Error())
-			} else {
-			  arn = fmt.Sprintf("arn:aws:iam::%s:%s", accountId, resource)
-			}
-		}
-
 		resp.RoleARN = arn
 		resp.Audience = c.defaultAudience
 		if audience, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.AudienceAnnotation]; ok {
