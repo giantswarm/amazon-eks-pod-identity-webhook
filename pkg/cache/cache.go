@@ -173,7 +173,7 @@ func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 		} else {
 			partition = "aws"
 		}
-		arn = fmt.Sprintf("arn:%s:iam::%s:%s", partition, accountId, arn)
+		arn = fmt.Sprintf("arn:%s:iam::%s:role/%s", partition, accountId, arn)
 	}
 
 	resp := &CacheResponse{}
