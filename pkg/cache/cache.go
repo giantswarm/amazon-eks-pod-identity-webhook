@@ -57,6 +57,7 @@ type serviceAccountCache struct {
 	annotationPrefix       string
 	defaultAudience        string
 	defaultRegionalSTS     bool
+	injectAccountID        bool
 	defaultTokenExpiration int64
 	webhookUsage           prometheus.Gauge
 }
@@ -160,7 +161,7 @@ func identity() (*ec2metadata.EC2InstanceIdentityDocument, error) {
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 	arn, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.RoleARNAnnotation]
 
-	if !strings.Contains(arn, "arn:") {
+	if !strings.Contains(arn, "arn:") && c.injectAccountID {
 		var accountId, partition string
 		identity, err := identity()
 		if err != nil {
@@ -221,7 +222,7 @@ func (c *serviceAccountCache) setCM(name, namespace string, resp *CacheResponse)
 	c.cmCache[namespace+"/"+name] = resp
 }
 
-func New(defaultAudience, prefix string, defaultRegionalSTS bool, defaultTokenExpiration int64, saInformer coreinformers.ServiceAccountInformer, cmInformer coreinformers.ConfigMapInformer) ServiceAccountCache {
+func New(defaultAudience, prefix string, defaultRegionalSTS, injectAccountID bool, defaultTokenExpiration int64, saInformer coreinformers.ServiceAccountInformer, cmInformer coreinformers.ConfigMapInformer) ServiceAccountCache {
 	hasSynced := func() bool {
 		if cmInformer != nil {
 			return saInformer.Informer().HasSynced() && cmInformer.Informer().HasSynced()
@@ -235,6 +236,7 @@ func New(defaultAudience, prefix string, defaultRegionalSTS bool, defaultTokenEx
 		defaultAudience:        defaultAudience,
 		annotationPrefix:       prefix,
 		defaultRegionalSTS:     defaultRegionalSTS,
+		injectAccountID:        injectAccountID,
 		defaultTokenExpiration: defaultTokenExpiration,
 		hasSynced:              hasSynced,
 		webhookUsage:           webhookUsage,
