@@ -62,30 +62,35 @@ func TestNonRegionalSTS(t *testing.T) {
 		name                   string
 		regionalSTSAnnotation  *string
 		defaultRegionalSTS     bool
+		injectAccountID        bool
 		expectedUseRegionalSts bool
 	}{
 		{
-			name:                   "annotation true, default false, expect true",
+			name:                   "annotation true, default false, inject false, expect true",
 			regionalSTSAnnotation:  &trueStr,
 			defaultRegionalSTS:     false,
+			injectAccountID:        false,
 			expectedUseRegionalSts: true,
 		},
 		{
-			name:                   "annotation false, default false, expect false",
+			name:                   "annotation false, default false, inject false, expect false",
 			regionalSTSAnnotation:  &falseStr,
 			defaultRegionalSTS:     false,
+			injectAccountID:        false,
 			expectedUseRegionalSts: false,
 		},
 		{
-			name:                   "annotation empty, default false, expect false",
+			name:                   "annotation empty, default false, inject false, expect false",
 			regionalSTSAnnotation:  &emptyStr,
 			defaultRegionalSTS:     false,
+			injectAccountID:        false,
 			expectedUseRegionalSts: false,
 		},
 		{
-			name:                   "no annotation, default false, expect false",
+			name:                   "no annotation, default false, inject false, expect false",
 			regionalSTSAnnotation:  nil,
 			defaultRegionalSTS:     false,
+			injectAccountID:        false,
 			expectedUseRegionalSts: false,
 		},
 		{
@@ -133,7 +138,7 @@ func TestNonRegionalSTS(t *testing.T) {
 			informerFactory := informers.NewSharedInformerFactory(fakeClient, 0)
 			informer := informerFactory.Core().V1().ServiceAccounts()
 
-			cache := New(audience, "eks.amazonaws.com", tc.defaultRegionalSTS, 86400, informer, nil)
+			cache := New(audience, "eks.amazonaws.com", tc.defaultRegionalSTS, tc.injectAccountID, 86400, informer, nil)
 			cache.(*serviceAccountCache).hasSynced = func() bool { return true }
 			stop := make(chan struct{})
 			informerFactory.Start(stop)
