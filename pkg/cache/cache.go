@@ -24,7 +24,6 @@ import (
 
 	"github.com/aws/amazon-eks-pod-identity-webhook/pkg"
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/prometheus/client_golang/prometheus"
 	v1 "k8s.io/api/core/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -39,6 +38,10 @@ type CacheResponse struct {
 	Audience        string
 	UseRegionalSTS  bool
 	TokenExpiration int64
+}
+
+type MetadataClient interface {
+	GetInstanceIdentityDocument() (ec2metadata.EC2InstanceIdentityDocument, error)
 }
 
 type ServiceAccountCache interface {
@@ -57,7 +60,8 @@ type serviceAccountCache struct {
 	annotationPrefix       string
 	defaultAudience        string
 	defaultRegionalSTS     bool
-	injectAccountID        bool
+	composeRoleArn         bool
+	identity               *ec2metadata.EC2InstanceIdentityDocument
 	defaultTokenExpiration int64
 	webhookUsage           prometheus.Gauge
 }
@@ -143,30 +147,12 @@ func (c *serviceAccountCache) ToJSON() string {
 	return string(contents)
 }
 
-func identity() (*ec2metadata.EC2InstanceIdentityDocument, error) {
-	sess, err := session.NewSession()
-	if err != nil {
-		return nil, err
-	}
-
-	metadata := ec2metadata.New(sess)
-	identity, err := metadata.GetInstanceIdentityDocument()
-	if err != nil {
-		return nil, err
-	}
-
-	return &identity, nil
-}
-
 func (c *serviceAccountCache) addSA(sa *v1.ServiceAccount) {
 	arn, ok := sa.Annotations[c.annotationPrefix+"/"+pkg.RoleARNAnnotation]
 
-	if !strings.Contains(arn, "arn:") && c.injectAccountID {
+	if !strings.Contains(arn, "arn:") && c.composeRoleArn {
 		var accountId, partition string
-		identity, err := identity()
-		if err != nil {
-			klog.Error("Couldn't get account ID", err.Error())
-		}
+		identity := c.identity
 
 		accountId = identity.AccountID
 		if strings.Contains(identity.Region, "cn-") {
@@ -222,7 +208,7 @@ func (c *serviceAccountCache) setCM(name, namespace string, resp *CacheResponse)
 	c.cmCache[namespace+"/"+name] = resp
 }
 
-func New(defaultAudience, prefix string, defaultRegionalSTS, injectAccountID bool, defaultTokenExpiration int64, saInformer coreinformers.ServiceAccountInformer, cmInformer coreinformers.ConfigMapInformer) ServiceAccountCache {
+func New(defaultAudience, prefix string, defaultRegionalSTS, composeRoleArn bool, defaultTokenExpiration int64, saInformer coreinformers.ServiceAccountInformer, cmInformer coreinformers.ConfigMapInformer, metadataClient MetadataClient) ServiceAccountCache {
 	hasSynced := func() bool {
 		if cmInformer != nil {
 			return saInformer.Informer().HasSynced() && cmInformer.Informer().HasSynced()
@@ -230,13 +216,20 @@ func New(defaultAudience, prefix string, defaultRegionalSTS, injectAccountID boo
 			return saInformer.Informer().HasSynced()
 		}
 	}
+
+	identity, err := metadataClient.GetInstanceIdentityDocument()
+	if err != nil {
+		klog.Errorf("Error getting instance identity document: %v", err.Error())
+	}
+
 	c := &serviceAccountCache{
 		saCache:                map[string]*CacheResponse{},
 		cmCache:                map[string]*CacheResponse{},
 		defaultAudience:        defaultAudience,
 		annotationPrefix:       prefix,
 		defaultRegionalSTS:     defaultRegionalSTS,
-		injectAccountID:        injectAccountID,
+		composeRoleArn:         composeRoleArn,
+		identity:               &identity,
 		defaultTokenExpiration: defaultTokenExpiration,
 		hasSynced:              hasSynced,
 		webhookUsage:           webhookUsage,

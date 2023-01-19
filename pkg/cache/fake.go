@@ -2,11 +2,12 @@ package cache
 
 import (
 	"encoding/json"
-	"k8s.io/api/core/v1"
 	"strconv"
 	"sync"
 
 	"github.com/aws/amazon-eks-pod-identity-webhook/pkg"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
+	v1 "k8s.io/api/core/v1"
 )
 
 // FakeServiceAccountCache is a goroutine safe cache for testing
@@ -81,4 +82,26 @@ func (f *FakeServiceAccountCache) ToJSON() string {
 		return ""
 	}
 	return string(contents)
+}
+
+type FakeMetadataClient struct {
+	IsErrorCase bool
+	Identity    ec2metadata.EC2InstanceIdentityDocument
+}
+
+func NewFakeMetadataClient(isErrorCase bool, identity ec2metadata.EC2InstanceIdentityDocument) *FakeMetadataClient {
+	c := &FakeMetadataClient{
+		IsErrorCase: isErrorCase,
+		Identity:    identity,
+	}
+
+	return c
+}
+
+func (f *FakeMetadataClient) GetInstanceIdentityDocument() (ec2metadata.EC2InstanceIdentityDocument, error) {
+	if !f.IsErrorCase {
+		return f.Identity, nil
+	}
+
+	return ec2metadata.EC2InstanceIdentityDocument{}, nil
 }

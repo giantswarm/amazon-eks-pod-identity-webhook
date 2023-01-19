@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/aws/amazon-eks-pod-identity-webhook/pkg"
+	awsarn "github.com/aws/aws-sdk-go/aws/arn"
+	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
@@ -62,35 +64,30 @@ func TestNonRegionalSTS(t *testing.T) {
 		name                   string
 		regionalSTSAnnotation  *string
 		defaultRegionalSTS     bool
-		injectAccountID        bool
 		expectedUseRegionalSts bool
 	}{
 		{
-			name:                   "annotation true, default false, inject false, expect true",
+			name:                   "annotation true, default false, expect true",
 			regionalSTSAnnotation:  &trueStr,
 			defaultRegionalSTS:     false,
-			injectAccountID:        false,
 			expectedUseRegionalSts: true,
 		},
 		{
-			name:                   "annotation false, default false, inject false, expect false",
+			name:                   "annotation false, default false, expect false",
 			regionalSTSAnnotation:  &falseStr,
 			defaultRegionalSTS:     false,
-			injectAccountID:        false,
 			expectedUseRegionalSts: false,
 		},
 		{
-			name:                   "annotation empty, default false, inject false, expect false",
+			name:                   "annotation empty, default false, expect false",
 			regionalSTSAnnotation:  &emptyStr,
 			defaultRegionalSTS:     false,
-			injectAccountID:        false,
 			expectedUseRegionalSts: false,
 		},
 		{
-			name:                   "no annotation, default false, inject false, expect false",
+			name:                   "no annotation, default false, expect false",
 			regionalSTSAnnotation:  nil,
 			defaultRegionalSTS:     false,
-			injectAccountID:        false,
 			expectedUseRegionalSts: false,
 		},
 		{
@@ -138,7 +135,9 @@ func TestNonRegionalSTS(t *testing.T) {
 			informerFactory := informers.NewSharedInformerFactory(fakeClient, 0)
 			informer := informerFactory.Core().V1().ServiceAccounts()
 
-			cache := New(audience, "eks.amazonaws.com", tc.defaultRegionalSTS, tc.injectAccountID, 86400, informer, nil)
+			metadataClient := NewFakeMetadataClient(false, ec2metadata.EC2InstanceIdentityDocument{})
+
+			cache := New(audience, "eks.amazonaws.com", tc.defaultRegionalSTS, false, 86400, informer, nil, metadataClient)
 			cache.(*serviceAccountCache).hasSynced = func() bool { return true }
 			stop := make(chan struct{})
 			informerFactory.Start(stop)
@@ -382,4 +381,64 @@ func TestCachePrecedence(t *testing.T) {
 		}
 	}
 
+}
+
+func TestRoleArnComposition(t *testing.T) {
+	role := "s3-reader"
+	audience := "sts.amazonaws.com"
+	tokenExpiration := "3600"
+	composeRoleArn := true
+	region := "test"
+	accountID := "111122223333"
+	resource := fmt.Sprintf("role/%s", role)
+
+	testSA := &v1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "default",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"eks.amazonaws.com/role-arn":         role,
+				"eks.amazonaws.com/token-expiration": tokenExpiration,
+			},
+		},
+	}
+
+	testIdentity := ec2metadata.EC2InstanceIdentityDocument{
+		Region:    region,
+		AccountID: accountID,
+	}
+	metadataClient := NewFakeMetadataClient(false, testIdentity)
+
+	fakeClient := fake.NewSimpleClientset(testSA)
+	informerFactory := informers.NewSharedInformerFactory(fakeClient, 0)
+	informer := informerFactory.Core().V1().ServiceAccounts()
+
+	cache := New(audience, "eks.amazonaws.com", true, composeRoleArn, 86400, informer, nil, metadataClient)
+	cache.(*serviceAccountCache).hasSynced = func() bool { return true }
+	stop := make(chan struct{})
+	informerFactory.Start(stop)
+	cache.Start(stop)
+	defer close(stop)
+
+	err := wait.ExponentialBackoff(wait.Backoff{Duration: 10 * time.Millisecond, Factor: 1.0, Steps: 3}, func() (bool, error) {
+		return len(fakeClient.Actions()) != 0, nil
+	})
+	if err != nil {
+		t.Fatalf("informer never called client: %v", err)
+	}
+
+	err = wait.ExponentialBackoff(wait.Backoff{Duration: 10 * time.Millisecond, Factor: 1.0, Steps: 3}, func() (bool, error) {
+		return len(cache.(*serviceAccountCache).saCache) != 0, nil
+	})
+	if err != nil {
+		t.Fatalf("cache never called addSA: %v", err)
+	}
+
+	roleArn, _, _, _ := cache.Get("default", "default")
+	arn, err := awsarn.Parse(roleArn)
+
+	assert.NoError(t, err, "Expected ARN parsing to succeed")
+	assert.True(t, awsarn.IsARN(roleArn), "Expected ARN validation to be true, got false")
+	assert.Equal(t, accountID, arn.AccountID, "Expected account ID to be %s, got %s", accountID, arn.AccountID)
+	assert.Equal(t, resource, arn.Resource, "Expected resource to be %s, got %s", resource, arn.Resource)
 }
