@@ -414,27 +414,20 @@ func TestRoleArnComposition(t *testing.T) {
 	informer := informerFactory.Core().V1().ServiceAccounts()
 
 	cache := New(audience, "eks.amazonaws.com", true, composeRoleArn, 86400, informer, nil, metadataClient)
-	cache.(*serviceAccountCache).hasSynced = func() bool { return true }
 	stop := make(chan struct{})
 	informerFactory.Start(stop)
 	cache.Start(stop)
 	defer close(stop)
 
+	var roleArn string
 	err := wait.ExponentialBackoff(wait.Backoff{Duration: 10 * time.Millisecond, Factor: 1.0, Steps: 3}, func() (bool, error) {
-		return len(fakeClient.Actions()) != 0, nil
+		roleArn, _, _, _ = cache.Get("default", "default")
+		return roleArn != "", nil
 	})
 	if err != nil {
-		t.Fatalf("informer never called client: %v", err)
+		t.Fatalf("cache never returned role arn %v", err)
 	}
 
-	err = wait.ExponentialBackoff(wait.Backoff{Duration: 10 * time.Millisecond, Factor: 1.0, Steps: 3}, func() (bool, error) {
-		return len(cache.(*serviceAccountCache).saCache) != 0, nil
-	})
-	if err != nil {
-		t.Fatalf("cache never called addSA: %v", err)
-	}
-
-	roleArn, _, _, _ := cache.Get("default", "default")
 	arn, err := awsarn.Parse(roleArn)
 
 	assert.NoError(t, err, "Expected ARN parsing to succeed")
