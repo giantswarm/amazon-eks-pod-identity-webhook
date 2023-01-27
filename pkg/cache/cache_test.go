@@ -135,12 +135,12 @@ func TestNonRegionalSTS(t *testing.T) {
 			informerFactory := informers.NewSharedInformerFactory(fakeClient, 0)
 			informer := informerFactory.Core().V1().ServiceAccounts()
 
-			metadataClient := NewFakeMetadataClient(false, ec2metadata.EC2InstanceIdentityDocument{})
+			testIdentity := ec2metadata.EC2InstanceIdentityDocument{}
 
-			cache := New(audience, "eks.amazonaws.com", tc.defaultRegionalSTS, false, 86400, informer, nil, metadataClient)
-			cache.(*serviceAccountCache).hasSynced = func() bool { return true }
+			cache := New(audience, "eks.amazonaws.com", tc.defaultRegionalSTS, false, 86400, informer, nil, testIdentity)
 			stop := make(chan struct{})
 			informerFactory.Start(stop)
+			informerFactory.WaitForCacheSync(stop)
 			cache.Start(stop)
 			defer close(stop)
 
@@ -407,15 +407,16 @@ func TestRoleArnComposition(t *testing.T) {
 		Region:    region,
 		AccountID: accountID,
 	}
-	metadataClient := NewFakeMetadataClient(false, testIdentity)
 
 	fakeClient := fake.NewSimpleClientset(testSA)
 	informerFactory := informers.NewSharedInformerFactory(fakeClient, 0)
 	informer := informerFactory.Core().V1().ServiceAccounts()
 
-	cache := New(audience, "eks.amazonaws.com", true, composeRoleArn, 86400, informer, nil, metadataClient)
+	cache := New(audience, "eks.amazonaws.com", true, composeRoleArn, 86400, informer, nil, testIdentity)
 	stop := make(chan struct{})
 	informerFactory.Start(stop)
+	informerFactory.WaitForCacheSync(stop)
+
 	cache.Start(stop)
 	defer close(stop)
 

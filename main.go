@@ -125,6 +125,10 @@ func main() {
 	}
 
 	metadataClient := ec2metadata.New(sess)
+	identity, err := metadataClient.GetInstanceIdentityDocument()
+	if err != nil {
+		klog.Fatalf("Error getting instance identity document: %v", err.Error())
+	}
 
 	saCache := cache.New(
 		*audience,
@@ -134,7 +138,7 @@ func main() {
 		*tokenExpiration,
 		saInformer,
 		cmInformer,
-		metadataClient,
+		identity,
 	)
 	stop := make(chan struct{})
 	informerFactory.Start(stop)

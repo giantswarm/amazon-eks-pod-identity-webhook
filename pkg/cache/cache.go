@@ -40,10 +40,6 @@ type CacheResponse struct {
 	TokenExpiration int64
 }
 
-type MetadataClient interface {
-	GetInstanceIdentityDocument() (ec2metadata.EC2InstanceIdentityDocument, error)
-}
-
 type ServiceAccountCache interface {
 	Start(stop chan struct{})
 	Get(name, namespace string) (role, aud string, useRegionalSTS bool, tokenExpiration int64)
@@ -61,7 +57,7 @@ type serviceAccountCache struct {
 	defaultAudience        string
 	defaultRegionalSTS     bool
 	composeRoleArn         bool
-	identity               *ec2metadata.EC2InstanceIdentityDocument
+	identity               ec2metadata.EC2InstanceIdentityDocument
 	defaultTokenExpiration int64
 	webhookUsage           prometheus.Gauge
 }
@@ -208,18 +204,13 @@ func (c *serviceAccountCache) setCM(name, namespace string, resp *CacheResponse)
 	c.cmCache[namespace+"/"+name] = resp
 }
 
-func New(defaultAudience, prefix string, defaultRegionalSTS, composeRoleArn bool, defaultTokenExpiration int64, saInformer coreinformers.ServiceAccountInformer, cmInformer coreinformers.ConfigMapInformer, metadataClient MetadataClient) ServiceAccountCache {
+func New(defaultAudience, prefix string, defaultRegionalSTS, composeRoleArn bool, defaultTokenExpiration int64, saInformer coreinformers.ServiceAccountInformer, cmInformer coreinformers.ConfigMapInformer, identity ec2metadata.EC2InstanceIdentityDocument) ServiceAccountCache {
 	hasSynced := func() bool {
 		if cmInformer != nil {
 			return saInformer.Informer().HasSynced() && cmInformer.Informer().HasSynced()
 		} else {
 			return saInformer.Informer().HasSynced()
 		}
-	}
-
-	identity, err := metadataClient.GetInstanceIdentityDocument()
-	if err != nil {
-		klog.Errorf("Error getting instance identity document: %v", err.Error())
 	}
 
 	c := &serviceAccountCache{
@@ -229,7 +220,7 @@ func New(defaultAudience, prefix string, defaultRegionalSTS, composeRoleArn bool
 		annotationPrefix:       prefix,
 		defaultRegionalSTS:     defaultRegionalSTS,
 		composeRoleArn:         composeRoleArn,
-		identity:               &identity,
+		identity:               identity,
 		defaultTokenExpiration: defaultTokenExpiration,
 		hasSynced:              hasSynced,
 		webhookUsage:           webhookUsage,
